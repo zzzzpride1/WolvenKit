@@ -44,7 +44,11 @@
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0,1" />
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
             <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.45" />
+                </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="IsSelected" Value="True" />
                 </Trigger>
@@ -160,11 +164,27 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <TextBlock
-                    Margin="4,1,4,7"
-                    FontSize="{DynamicResource WolvenKitFontSubTitle}"
-                    FontWeight="SemiBold"
-                    Text="{Binding Heading, ElementName=Root}" />
+                <StackPanel>
+                    <TextBlock
+                        Margin="4,1,4,7"
+                        FontSize="{DynamicResource WolvenKitFontSubTitle}"
+                        FontWeight="SemiBold"
+                        Text="{Binding Heading, ElementName=Root}" />
+                    <TextBlock
+                        Margin="4,0,4,7"
+                        Text="{Binding ContextDescription, ElementName=Root}"
+                        TextWrapping="Wrap">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ContextDescription, ElementName=Root}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
 
                 <Border
                     Grid.Row="1"

@@ -18,6 +18,65 @@
     d:DesignHeight="450"
     x:Name="uc">
     <UserControl.Resources>
+        <Style x:Key="QuestRewireNodeInputStyle" TargetType="{x:Type nodify:NodeInput}" BasedOn="{StaticResource {x:Type nodify:NodeInput}}">
+            <Style.Triggers>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Compatible">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Incompatible">
+                    <Setter Property="BorderBrush" Value="#FFCD5C5C" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Fixed">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Moving">
+                    <Setter Property="BorderBrush" Value="#FFFFD700" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Source">
+                    <Setter Property="BorderBrush" Value="#FFFFD700" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Compatible">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Incompatible">
+                    <Setter Property="BorderBrush" Value="#FFCD5C5C" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Queued">
+                    <Setter Property="BorderBrush" Value="#FF00BFFF" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="QuestRewireNodeOutputStyle" TargetType="{x:Type nodify:NodeOutput}" BasedOn="{StaticResource {x:Type nodify:NodeOutput}}">
+            <Style.Triggers>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Compatible">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Incompatible">
+                    <Setter Property="BorderBrush" Value="#FFCD5C5C" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Fixed">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestRewireSocketState" Value="Moving">
+                    <Setter Property="BorderBrush" Value="#FFFFD700" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Source">
+                    <Setter Property="BorderBrush" Value="#FFFFD700" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Compatible">
+                    <Setter Property="BorderBrush" Value="#FF90EE90" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Incompatible">
+                    <Setter Property="BorderBrush" Value="#FFCD5C5C" />
+                </Trigger>
+                <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Queued">
+                    <Setter Property="BorderBrush" Value="#FF00BFFF" />
+                </Trigger>
+                <DataTrigger Binding="{Binding ElementName=uc, Path=Source.GraphType}" Value="Quest">
+                    <Setter Property="ToolTip" Value="Shift + drag from a flow output to connect several targets. Release to confirm; Esc cancels." />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <!-- Node icon converter -->
         <converters:NodeIconConverter x:Key="NodeIconConverter" />
 
@@ -412,6 +471,26 @@
                                         <Setter Property="BorderBrush" Value="{StaticResource WolvenKitYellow}" />
                                         <Setter Property="BorderThickness" Value="2" />
                                     </DataTrigger>
+                                    <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Source">
+                                        <Setter Property="BorderBrush" Value="#FFFFD700" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                    </Trigger>
+                                    <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Compatible">
+                                        <Setter Property="BorderBrush" Value="#FF90EE90" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                    </Trigger>
+                                    <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Incompatible">
+                                        <Setter Property="BorderBrush" Value="#FFCD5C5C" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                    </Trigger>
+                                    <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Ambiguous">
+                                        <Setter Property="BorderBrush" Value="#FFFFD700" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                    </Trigger>
+                                    <Trigger Property="local:GraphEditorView.QuestMultiConnectState" Value="Queued">
+                                        <Setter Property="BorderBrush" Value="#FF00BFFF" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                    </Trigger>
                                 </Style.Triggers>
                             </Style>
                         </nodify:Node.Style>
@@ -419,6 +498,7 @@
                         <nodify:Node.InputConnectorTemplate>
                             <DataTemplate DataType="{x:Type nodes:InputConnectorViewModel}">
                                 <nodify:NodeInput
+                                    Style="{StaticResource QuestRewireNodeInputStyle}"
                                     Margin="0,2,0,2"
                                     Background="Transparent"
                                     Visibility="{Binding IsVisible,
@@ -473,6 +553,7 @@
                         <nodify:Node.OutputConnectorTemplate>
                             <DataTemplate DataType="{x:Type nodes:OutputConnectorViewModel}">
                                 <nodify:NodeOutput
+                                    Style="{StaticResource QuestRewireNodeOutputStyle}"
                                     Visibility="{Binding IsVisible,
                                                          Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Anchor="{Binding Anchor,
@@ -676,6 +757,9 @@
                                     <Trigger Property="IsSelected" Value="True">
                                         <Setter Property="Stroke" Value="{StaticResource WolvenKitGreen}" />
                                     </Trigger>
+                                    <Trigger Property="local:GraphEditorView.QuestRewireActive" Value="True">
+                                        <Setter Property="Stroke" Value="#FFFFD700" />
+                                    </Trigger>
 
                                     <!--
                                     <DataTrigger Binding="{Binding Source.Node.IsSelected, UpdateSourceTrigger=PropertyChanged}" Value="True">
@@ -729,6 +813,41 @@
             </nodify:NodifyEditor.ContextMenu>
         </nodify:NodifyEditor>
 
+        <!-- Screen-space handles keep a practical hitbox at every zoom level. Empty overlay space does not intercept input. -->
+        <Canvas x:Name="QuestRewireOverlay" ClipToBounds="True">
+            <nodify:Connection x:Name="QuestRewirePreview" IsHitTestVisible="False" IsSelectable="False"
+                               SourceOffset="0,0" TargetOffset="0,0" Stroke="#FFFFD700" StrokeThickness="2.5"
+                               StrokeDashArray="3,2" Visibility="Collapsed" />
+            <Border x:Name="QuestRewireSourceHandle" Width="22" Height="22" Background="Transparent" CornerRadius="11"
+                    Cursor="Hand" ToolTip="Drag to change this connection's source" Visibility="Collapsed"
+                    Tag="{x:Static nodes:QuestConnectionEndpoint.Source}" PreviewMouseLeftButtonDown="QuestRewireHandle_OnPreviewMouseDown">
+                <Ellipse x:Name="QuestRewireSourceDot" Width="8" Height="8" Fill="#FF696969" Stroke="#FFFFD700" StrokeThickness="1.5" IsHitTestVisible="False" />
+            </Border>
+            <Border x:Name="QuestRewireDestinationHandle" Width="22" Height="22" Background="Transparent" CornerRadius="11"
+                    Cursor="Hand" ToolTip="Drag to change this connection's destination" Visibility="Collapsed"
+                    Tag="{x:Static nodes:QuestConnectionEndpoint.Destination}" PreviewMouseLeftButtonDown="QuestRewireHandle_OnPreviewMouseDown">
+                <Ellipse x:Name="QuestRewireDestinationDot" Width="8" Height="8" Fill="#FF696969" Stroke="#FFFFD700" StrokeThickness="1.5" IsHitTestVisible="False" />
+            </Border>
+            <Border x:Name="QuestRewireHint" Padding="6,3" Background="#EE202020" CornerRadius="3" IsHitTestVisible="False" Visibility="Collapsed">
+                <TextBlock x:Name="QuestRewireHintText" Foreground="White" FontSize="12" MaxWidth="420" TextWrapping="Wrap" />
+            </Border>
+        </Canvas>
+        <!-- UI-only batch previews; no RED connection exists until the continuous swipe is released. -->
+        <Canvas x:Name="QuestMultiConnectOverlay" IsHitTestVisible="False" ClipToBounds="True" Visibility="Collapsed">
+            <nodify:Connection x:Name="QuestMultiConnectPreview" IsSelectable="False"
+                               SourceOffset="0,0" TargetOffset="0,0" Stroke="#FFFFD700" StrokeThickness="2.5" StrokeDashArray="3,2" />
+            <Border x:Name="QuestMultiConnectHint" Padding="6,3" Background="#EE202020" CornerRadius="3">
+                <TextBlock x:Name="QuestMultiConnectHintText" Foreground="White" FontSize="12" MaxWidth="420" TextWrapping="Wrap" />
+            </Border>
+        </Canvas>
+        <!-- Bundle previews and feedback are UI-only and never intercept graph input. -->
+        <Canvas x:Name="QuestConnectionClipboardPreview" IsHitTestVisible="False" ClipToBounds="True" />
+        <Border x:Name="QuestConnectionClipboardHint" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                Margin="12" Padding="8,5" Background="#EE202020" CornerRadius="3"
+                IsHitTestVisible="False" Visibility="Collapsed">
+            <TextBlock x:Name="QuestConnectionClipboardHintText" Foreground="White" FontSize="12"
+                       MaxWidth="480" TextWrapping="Wrap" />
+        </Border>
         <Popup
             x:Name="ActionPalettePopup"
             AllowsTransparency="True"

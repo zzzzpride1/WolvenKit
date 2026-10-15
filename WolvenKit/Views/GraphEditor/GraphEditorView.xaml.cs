@@ -18,6 +18,7 @@ using Syncfusion.SfSkinManager;
 using ReactiveUI;
 using Splat;
 using WolvenKit.App.Services;
+using WolvenKit.App.Interaction;
 using WolvenKit.App.ViewModels.Controls;
 using WolvenKit.App.ViewModels.Dialogs;
 using WolvenKit.App.ViewModels.GraphEditor;
@@ -47,9 +48,13 @@ public partial class GraphEditorView : UserControl
 {
     private readonly RedTypeTemplateService _redTypeTemplateService = Locator.Current.GetService<RedTypeTemplateService>();
     private readonly ILoggerService _loggerService = Locator.Current.GetService<ILoggerService>();
+    private readonly ISettingsManager _settingsManager = Locator.Current.GetService<ISettingsManager>();
     private RedTypeTemplateDropdownViewModel _nodeTemplateOptions;
     private System.Windows.Point _actionPaletteGraphPosition;
     private double _actionPalettePopupHorizontalOffset;
+    private BehaviorNodeViewModel _actionPaletteBehaviorParent;
+    private bool _actionPaletteCreatesBehaviorRoot;
+    private QuestConnectionViewModel _actionPaletteQuestInsertionConnection;
 
     private static readonly (string Name, string Color)[] s_commentColorPresets =
     [
@@ -78,7 +83,10 @@ public partial class GraphEditorView : UserControl
             return;
         }
 
+        view.CancelQuestConnectionRewire();
+        view.CancelQuestMultiConnect();
         view.SourceChanged?.Invoke(view, e.NewValue as RedGraph);
+        view._actionPaletteQuestInsertionConnection = null;
 
         if (view.Source is null)
         {
@@ -167,12 +175,20 @@ public partial class GraphEditorView : UserControl
     public GraphEditorView()
     {
         InitializeComponent();
+        InitializeQuestConnectionRewiring();
+        InitializeQuestMultiConnect();
+        InitializeQuestConnectionClipboard();
         SfSkinManager.SetTheme(Editor, new Theme("Default"));
 
         _appViewModel = Locator.Current.GetService<AppViewModel>();
+        Editor.PreviewKeyDown += Editor_OnPreviewKeyDown;
         ActionPalette.DismissRequested += (_, _) => CloseActionPalette();
         ActionPalette.ActionExecuted += (_, _) => CloseActionPalette();
-        ActionPalettePopup.Closed += (_, _) => ActionPalette.Close();
+        ActionPalettePopup.Closed += (_, _) =>
+        {
+            ActionPalette.Close();
+            _actionPaletteQuestInsertionConnection = null;
+        };
         ActionPalette.ShouldPlaceVariantsOnLeft = () =>
         {
             var spaceOnRight = Editor.ActualWidth -
@@ -246,23 +262,11 @@ public partial class GraphEditorView : UserControl
         // Get the mouse position in graph coordinates for placing new nodes at cursor location
         var mousePosition = GetMousePositionInGraph(nodifyEditor);
 
-        if (Source.GraphType is RedGraphType.Quest or RedGraphType.Scene)
+        if (Source.GraphType is RedGraphType.Quest or RedGraphType.Scene or RedGraphType.Behavior)
         {
             OpenGraphActionPalette(mousePosition, Mouse.GetPosition(nodifyEditor));
             e.Handled = true;
             return;
-        }
-
-        if (Source.GraphType == RedGraphType.Behavior && Source.CanCreateBehaviorRoot())
-        {
-            var addMenu = CreateAddMenuItem();
-            AddBehaviorNodeCreationItems(addMenu, type =>
-            {
-                var nodeId = Source.CreateBehaviorRoot(type.Type, mousePosition, type.RedTypeTemplateSelectionOption);
-                SelectNodeById(nodeId);
-            });
-
-            nodifyEditor.ContextMenu.Items.Add(addMenu);
         }
 
         nodifyEditor.ContextMenu.Items.Add(CreateMenuItem("Arrange Items", "ViewDashboard", ArrangeNodes));
@@ -327,14 +331,15 @@ public partial class GraphEditorView : UserControl
         {
             if (nvm is BehaviorNodeViewModel behaviorNode && Source.CanAddBehaviorChild(behaviorNode))
             {
-                var addChildMenu = CreateCategoryMenuItem("Add Child");
-                AddBehaviorNodeCreationItems(addChildMenu, type =>
+                var graphPosition = GetMousePositionInGraph(Editor);
+                var popupPosition = Mouse.GetPosition(Editor);
+                node.ContextMenu.Items.Add(CreateMenuItem("Add Child ...", "Plus", () =>
                 {
-                    var nodeId = Source.AddBehaviorChild(behaviorNode, type.Type, type.RedTypeTemplateSelectionOption);
-                    SelectNodeById(nodeId);
-                });
-
-                node.ContextMenu.Items.Add(addChildMenu);
+                    node.ContextMenu.SetCurrentValue(ContextMenu.IsOpenProperty, false);
+                    Dispatcher.BeginInvoke(
+                        () => OpenGraphActionPalette(graphPosition, popupPosition, behaviorNode),
+                        DispatcherPriority.ContextIdle);
+                }));
                 node.ContextMenu.Items.Add(new Separator());
             }
 
@@ -353,6 +358,11 @@ public partial class GraphEditorView : UserControl
         var selectedGraphNodes = SelectedNodes.OfType<NodeViewModel>().Cast<object>().ToList();
         if (selectedGraphNodes.Count > 1)
         {
+            if (Source.GraphType == RedGraphType.Quest)
+            {
+                node.ContextMenu.Items.Add(CreateMenuItem("Duplicate Selected Nodes", "ContentDuplicate", "WolvenKitYellow",
+                    () => DuplicateSelectedQuestNodes()));
+            }
             node.ContextMenu.Items.Add(CreateMenuItem("Destroy Nodes", "CloseBoxOutline", "WolvenKitRed", () => Source.RemoveNodes(selectedGraphNodes)));
             if (Source.GraphType == RedGraphType.Quest)
             {
@@ -420,8 +430,27 @@ public partial class GraphEditorView : UserControl
             node.ContextMenu.Items.Add(new Separator());
         }
 
-        node.ContextMenu.Items.Add(CreateMenuItem("Duplicate Node", "ContentDuplicate", "WolvenKitYellow", () => Source.DuplicateNode(nvm)));
+        if (Source.GraphType == RedGraphType.Quest)
+        {
+            node.ContextMenu.Items.Add(CreateMenuItem("Duplicate Selected Nodes", "ContentDuplicate", "WolvenKitYellow", () =>
+            {
+                if (!Editor.SelectedItems.Contains(nvm))
+                {
+                    Editor.SelectedItems.Clear();
+                    Editor.SelectedItems.Add(nvm);
+                }
+                DuplicateSelectedQuestNodes();
+            }));
+        }
+        else
+        {
+            node.ContextMenu.Items.Add(CreateMenuItem("Duplicate Node", "ContentDuplicate", "WolvenKitYellow", () => Source.DuplicateNode(nvm)));
+        }
         node.ContextMenu.Items.Add(CreateMenuItem("Copy Node", "ContentCopy", "WolvenKitYellow", () => GraphClipboardManager.CopyNode(nvm, Source.GraphType)));
+        if (Source.GraphType == RedGraphType.Quest && nvm is BaseQuestViewModel questAnchor)
+        {
+            AddQuestConnectionClipboardMenu(node.ContextMenu, questAnchor);
+        }
 
         var templateData = GetTemplateData(nvm);
         if (templateData != null && RedTypeTemplateService.IsTypeTemplatable(templateData.GetType()))
@@ -768,22 +797,64 @@ public partial class GraphEditorView : UserControl
     }
 
 
-    private static MenuItem CreateAddMenuItem() => new()
+    private void Editor_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        Header = "Add Node",
-        Padding = (Thickness)Application.Current.Resources["WolvenKitMarginTiny"]!,
-        Icon = new IconBox
+        if (e.Handled || e.IsRepeat ||
+            Source?.GraphType is not (RedGraphType.Quest or RedGraphType.Scene) ||
+            !Editor.IsKeyboardFocusWithin || !Editor.IsMouseOver ||
+            ActionPalettePopup.IsOpen || Editor.ContextMenu?.IsOpen == true ||
+            IsGraphTextInputFocused())
         {
-            IconPack = IconPackType.Material,
-            Kind = "Plus",
-            Margin = (Thickness)Application.Current.Resources["WolvenKitMarginTiny"]!,
-            Size = (double)Application.Current.Resources["WolvenKitIconMicro"]!
+            return;
         }
-    };
+
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var actionId = GraphActionShortcuts.GetActionId(_settingsManager?.GraphActionShortcuts, key, Keyboard.Modifiers);
+        if (actionId is null)
+        {
+            return;
+        }
+
+        // IsMouseOver can stay true outside the viewport while Nodify captures the mouse.
+        var mousePosition = Mouse.GetPosition(Editor);
+        if (mousePosition.X < 0 || mousePosition.Y < 0 ||
+            mousePosition.X >= Editor.ActualWidth || mousePosition.Y >= Editor.ActualHeight)
+        {
+            return;
+        }
+
+        EnsureNodeTemplateOptions();
+        _nodeTemplateOptions.RefreshFromRegistry();
+        var actions = CreateGraphActionPaletteItems(Source, GetMousePositionInGraph(Editor, mousePosition));
+        var action = actions.SelectMany(item => item.Variants.Prepend(item))
+            .FirstOrDefault(item => item.ActionId == actionId);
+        if (action?.TryExecute() == true)
+        {
+            e.Handled = true;
+        }
+    }
+
+    internal static bool IsGraphTextInputFocused()
+    {
+        for (var element = Keyboard.FocusedElement as DependencyObject; element is not null;)
+        {
+            if (element is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox or ComboBox or
+                System.Windows.Documents.TextElement)
+            {
+                return true;
+            }
+
+            element = element is Visual
+                ? VisualTreeHelper.GetParent(element)
+                : LogicalTreeHelper.GetParent(element);
+        }
+
+        return false;
+    }
 
     public void OpenActionPaletteAtViewportCenter()
     {
-        if (Source?.GraphType is not (RedGraphType.Quest or RedGraphType.Scene))
+        if (Source?.GraphType is not (RedGraphType.Quest or RedGraphType.Scene or RedGraphType.Behavior))
         {
             return;
         }
@@ -794,14 +865,26 @@ public partial class GraphEditorView : UserControl
         OpenGraphActionPalette(GetViewportCenter(), popupPosition);
     }
 
-    private void OpenGraphActionPalette(System.Windows.Point graphPosition, System.Windows.Point popupPosition)
+    private void OpenGraphActionPalette(
+        System.Windows.Point graphPosition,
+        System.Windows.Point popupPosition,
+        BehaviorNodeViewModel behaviorParent = null,
+        QuestConnectionViewModel insertionConnection = null)
     {
-        if (Source?.GraphType is not (RedGraphType.Quest or RedGraphType.Scene))
+        if (Source?.GraphType is not (RedGraphType.Quest or RedGraphType.Scene or RedGraphType.Behavior))
         {
             return;
         }
 
         CloseActionPalette();
+        _actionPaletteQuestInsertionConnection = insertionConnection;
+        var selectedParents = SelectedNodes.OfType<BehaviorNodeViewModel>()
+            .Where(parent => Source.Nodes.Contains(parent)).Take(2).ToList();
+        _actionPaletteBehaviorParent = behaviorParent ?? (selectedParents.Count == 1 ? selectedParents[0] : null);
+        _actionPaletteCreatesBehaviorRoot = Source.GraphType == RedGraphType.Behavior && Source.CanCreateBehaviorRoot();
+        ActionPalette.ContextDescription = insertionConnection is null
+            ? ""
+            : "Replace this connection with a node. Choose sockets when the new node has multiple inputs or outputs.";
         EnsureNodeTemplateOptions();
         _nodeTemplateOptions.RefreshFromRegistry();
         _actionPaletteGraphPosition = graphPosition;
@@ -811,13 +894,20 @@ public partial class GraphEditorView : UserControl
             _actionPalettePopupHorizontalOffset);
         ActionPalettePopup.SetCurrentValue(System.Windows.Controls.Primitives.Popup.VerticalOffsetProperty, Math.Max(4, popupPosition.Y));
         ActionPalette.Open(
-            Source.GraphType == RedGraphType.Quest ? "All Actions for Quest Graph" : "All Actions for Scene Graph",
-            CreateGraphActionPaletteItems(Source, graphPosition));
+            insertionConnection is not null ? "Insert Node on Connection" : Source.GraphType switch
+            {
+                RedGraphType.Quest => "All Actions for Quest Graph",
+                RedGraphType.Scene => "All Actions for Scene Graph",
+                RedGraphType.Behavior => "All Actions for Behavior Graph",
+                _ => throw new InvalidOperationException("Unsupported graph action palette.")
+            },
+            CreateGraphActionPaletteItems(Source, graphPosition, insertionConnection));
         ActionPalettePopup.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, true);
     }
 
     private void CloseActionPalette()
     {
+        _actionPaletteQuestInsertionConnection = null;
         ActionPalette.Close();
         ActionPalettePopup.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, false);
     }
@@ -826,9 +916,9 @@ public partial class GraphEditorView : UserControl
     {
         Dispatcher.BeginInvoke(() =>
         {
-            if (ActionPalettePopup.IsOpen && Source?.GraphType is (RedGraphType.Quest or RedGraphType.Scene))
+            if (ActionPalettePopup.IsOpen && Source?.GraphType is (RedGraphType.Quest or RedGraphType.Scene or RedGraphType.Behavior))
             {
-                ActionPalette.RefreshItems(CreateGraphActionPaletteItems(Source, _actionPaletteGraphPosition));
+                ActionPalette.RefreshItems(CreateGraphActionPaletteItems(Source, _actionPaletteGraphPosition, _actionPaletteQuestInsertionConnection));
             }
         });
     }
@@ -844,30 +934,45 @@ public partial class GraphEditorView : UserControl
         _nodeTemplateOptions.PostRefresh += NodeTemplateOptions_OnPostRefresh;
     }
 
-    private IReadOnlyList<GraphActionPaletteItem> CreateGraphActionPaletteItems(RedGraph graph, System.Windows.Point position)
+    private IReadOnlyList<GraphActionPaletteItem> CreateGraphActionPaletteItems(RedGraph graph, System.Windows.Point position,
+        QuestConnectionViewModel insertionConnection = null)
     {
+        if (graph.GraphType == RedGraphType.Behavior)
+        {
+            return CreateBehaviorActionPaletteItems(graph, position);
+        }
+
         var items = new List<GraphActionPaletteItem>();
         var hasNodeSelection = SelectedNodes.OfType<NodeViewModel>().Any();
 
-        items.Add(CreatePaletteCommand(
-            hasNodeSelection ? "Add Comment Around Selection" : "Add Comment",
-            "Graph",
-            "CommentTextOutline",
-            "comment annotation note",
-            () => graph.AddComment(position, SelectedNodes)));
-        items.Add(CreatePaletteCommand("Arrange Items", "Graph", "ViewDashboard", "layout arrange nodes", ArrangeNodes));
-        items.Add(CreatePaletteCommand("Hide/unhide sockets", "Graph", "Eye", "toggle sockets connectors", ToggleAllSockets));
-
-        if (GraphClipboardManager.CanPaste(graph.GraphType))
+        if (insertionConnection is null)
         {
-            items.Add(CreatePaletteCommand("Paste Node", "Graph", "ContentPaste", "clipboard paste", () =>
+            items.Add(CreatePaletteCommand(
+                hasNodeSelection ? "Add Comment Around Selection" : "Add Comment",
+                "Graph",
+                "CommentTextOutline",
+                "comment annotation note",
+                () => graph.AddComment(position, SelectedNodes)));
+            items.Add(CreatePaletteCommand("Arrange Items", "Graph", "ViewDashboard", "layout arrange nodes", ArrangeNodes));
+            items.Add(CreatePaletteCommand("Hide/unhide sockets", "Graph", "Eye", "toggle sockets connectors", ToggleAllSockets));
+
+            if (GraphClipboardManager.CanPaste(graph.GraphType))
             {
-                if (GraphClipboardManager.GetCopiedData() is { } copiedData)
+                items.Add(CreatePaletteCommand("Paste Node", "Graph", "ContentPaste", "clipboard paste", () =>
                 {
-                    graph.PasteNode(copiedData, position);
-                }
-            }));
+                    if (GraphClipboardManager.GetCopiedData() is { } copiedData)
+                    {
+                        graph.PasteNode(copiedData, position);
+                    }
+                }));
+            }
+
         }
+
+        GraphActionPaletteItem CreateItem(Type type, string category) => CreateNodePaletteItem(
+            graph, type, category, position, GraphNodeCreationCatalog.IsSearchOnly(type),
+            createNode: insertionConnection is null ? null :
+                template => InsertAndSelectQuestNode(graph, insertionConnection, type, position, template));
 
         var availableTypes = GetNodeCreationTypes(graph);
         var typeMap = availableTypes
@@ -879,12 +984,7 @@ public partial class GraphEditorView : UserControl
         {
             if (typeMap.TryGetValue(typeName, out var entry) && addedTypes.Add(entry.Type))
             {
-                items.Add(CreateNodePaletteItem(
-                    graph,
-                    entry.Type,
-                    category,
-                    position,
-                    GraphNodeCreationCatalog.IsSearchOnly(entry.Type)));
+                items.Add(CreateItem(entry.Type, category));
             }
         }
 
@@ -901,6 +1001,7 @@ public partial class GraphEditorView : UserControl
                 items.Add(new GraphActionPaletteItem
                 {
                     Title = title,
+                    ActionId = "preset:scene:DebugWarning",
                     Subtitle = "Preset scene node",
                     Category = category.Name,
                     SearchText = "debug warning ui manager",
@@ -928,15 +1029,105 @@ public partial class GraphEditorView : UserControl
                      .ThenBy(entry => GraphNodeStyling.GetTitleForNodeType(entry.Type)))
         {
             var category = entry.Category == "Scene" ? "Other Scene Nodes" : "Other Quest Nodes";
-            items.Add(CreateNodePaletteItem(
-                graph,
-                entry.Type,
-                category,
-                position,
-                GraphNodeCreationCatalog.IsSearchOnly(entry.Type)));
+            items.Add(CreateItem(entry.Type, category));
         }
 
         return items;
+    }
+
+    private IReadOnlyList<GraphActionPaletteItem> CreateBehaviorActionPaletteItems(RedGraph graph, System.Windows.Point position)
+    {
+        // Keep the opening context stable when template options refresh asynchronously.
+        var parent = _actionPaletteBehaviorParent;
+        var createRoot = _actionPaletteCreatesBehaviorRoot;
+        var canCreate = createRoot
+            ? graph.CanCreateBehaviorRoot()
+            : parent is not null && graph.CanAddBehaviorChild(parent);
+        ActionPalette.ContextDescription = canCreate
+            ? createRoot ? "Create the root of this behavior tree." : $"Add a child to {parent.Title}."
+            : "Select one composite or a decorator with an empty child slot to add a node.";
+
+        var items = new List<GraphActionPaletteItem>
+        {
+            CreatePaletteCommand("Arrange Items", "Graph", "ViewDashboard", "layout arrange nodes", ArrangeNodes),
+            CreatePaletteCommand("Hide/unhide sockets", "Graph", "Eye", "toggle sockets connectors", ToggleAllSockets)
+        };
+
+        var commonTypes = new[]
+        {
+            typeof(AIbehaviorSelectorTreeNodeDefinition),
+            typeof(AIbehaviorSequenceTreeNodeDefinition),
+            typeof(AIbehaviorParallelNodeDefinition),
+            typeof(AIbehaviorIfElseNodeDefinition),
+            typeof(AIbehaviorRepeatNodeDefinition),
+            typeof(AIbehaviorInstantTaskNodeDefinition),
+            typeof(AIbehaviorMonitorTaskNodeDefinition),
+            typeof(AIbehaviorInstantConditionNodeDefinition),
+            typeof(AIbehaviorMonitorConditionNodeDefinition),
+            typeof(AIbehaviorSubtreeDefinition),
+            typeof(AIbehaviorIncludedTreeDefinition)
+        };
+
+        foreach (var type in commonTypes.Where(graph.GetBehaviorNodeTypes().Contains))
+        {
+            items.Add(CreateNodePaletteItem(graph, type, "Common", position,
+                isEnabled: canCreate,
+                createNode: template => CreateAndSelectBehaviorNode(graph, parent, createRoot, type, position, template)));
+        }
+
+        foreach (var type in graph.GetBehaviorNodeTypes()
+                     .OrderBy(GetBehaviorNodeCategory)
+                     .ThenBy(GraphNodeStyling.GetTitleForNodeType))
+        {
+            items.Add(CreateNodePaletteItem(graph, type, GetBehaviorNodeCategory(type), position,
+                isEnabled: canCreate,
+                createNode: template => CreateAndSelectBehaviorNode(graph, parent, createRoot, type, position, template)));
+        }
+
+        return items;
+    }
+
+    private static string GetBehaviorNodeCategory(Type type)
+    {
+        if (typeof(AIbehaviorCompositeTreeNodeDefinition).IsAssignableFrom(type)) return "Composite";
+        if (typeof(AIbehaviorConditionNodeDefinition).IsAssignableFrom(type)) return "Conditions";
+        if (typeof(AIbehaviorTaskNodeDefinition).IsAssignableFrom(type)) return "Tasks";
+        if (typeof(AIbehaviorNestedTreeDefinition).IsAssignableFrom(type)) return "Trees";
+        if (typeof(AIbehaviorDecoratorNodeDefinition).IsAssignableFrom(type) ||
+            type == typeof(AIbehaviorIdleTreeNodeDefinition) ||
+            type == typeof(AIbehaviorSucceederNodeDefinition) ||
+            type == typeof(AIbehaviorFailerNodeDefinition)) return "Control";
+        return "Other Behavior Nodes";
+    }
+
+    private void CreateAndSelectBehaviorNode(
+        RedGraph graph,
+        BehaviorNodeViewModel parent,
+        bool createRoot,
+        Type type,
+        System.Windows.Point position,
+        RedTypeTemplateSelectionOption template)
+    {
+        // A parent may have been replaced or the document switched since opening the palette.
+        if (!ReferenceEquals(Source, graph) ||
+            !(createRoot ? graph.CanCreateBehaviorRoot() : parent is not null && graph.CanAddBehaviorChild(parent)))
+        {
+            return;
+        }
+
+        var nodeId = createRoot
+            ? graph.CreateBehaviorRoot(type, position, template)
+            : graph.AddBehaviorChild(parent, type, template);
+        SelectNodeById(nodeId);
+        var createdNode = graph.Nodes.First(node => node.UniqueId == nodeId);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (ReferenceEquals(Source, graph) && graph.Nodes.Contains(createdNode))
+            {
+                UpdateLayout();
+                graph.CenterOnSelectedNodes(new List<object> { createdNode });
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     private GraphActionPaletteItem CreateNodePaletteItem(
@@ -944,8 +1135,11 @@ public partial class GraphEditorView : UserControl
         Type type,
         string category,
         System.Windows.Point position,
-        bool isSearchOnly = false)
+        bool isSearchOnly = false,
+        bool isEnabled = true,
+        Action<RedTypeTemplateSelectionOption> createNode = null)
     {
+        createNode ??= template => CreateAndSelectNode(graph, type, position, template);
         var title = GraphNodeStyling.GetTitleForNodeType(type);
         var glyph = GraphNodeStyling.GetIconForNodeTitle(title);
         var templateOptions = GetTemplateOptions(type);
@@ -960,6 +1154,7 @@ public partial class GraphEditorView : UserControl
                 .ThenBy(option => option.Name)
                 .Select(option => new GraphActionPaletteItem
                 {
+                    ActionId = GraphActionShortcuts.GetTemplateActionId(type, option),
                     Title = option.Name,
                     Subtitle = option.Source switch
                     {
@@ -972,21 +1167,24 @@ public partial class GraphEditorView : UserControl
                     Glyph = glyph,
                     ParentTitle = title,
                     IsVariant = true,
-                    Execute = () => CreateAndSelectNode(graph, type, position, option)
+                    IsEnabled = isEnabled,
+                    Execute = () => createNode(option)
                 })
                 .ToList();
         }
 
         return new GraphActionPaletteItem
         {
+            ActionId = GraphActionShortcuts.GetNodeActionId(type),
             Title = title,
             Subtitle = type.Name,
             Category = category,
             SearchText = type.FullName ?? type.Name,
             Glyph = glyph,
             IsSearchOnly = isSearchOnly,
+            IsEnabled = isEnabled,
             Variants = variants,
-            Execute = () => CreateAndSelectNode(graph, type, position, defaultTemplate)
+            Execute = () => createNode(defaultTemplate)
         };
     }
 
@@ -1019,6 +1217,84 @@ public partial class GraphEditorView : UserControl
         {
             SelectNodeById(nodeId);
         }
+    }
+
+    private void InsertAndSelectQuestNode(RedGraph graph, QuestConnectionViewModel connection,
+        Type type, System.Windows.Point position, RedTypeTemplateSelectionOption template)
+    {
+        CloseActionPalette();
+        if (!ReferenceEquals(Source, graph) || !graph.CanInsertQuestNodeOnConnection(connection))
+        {
+            return;
+        }
+
+        BaseQuestViewModel candidate = null;
+        var inserted = false;
+        try
+        {
+            candidate = graph.PrepareQuestNode(type, position, template);
+            var inputs = RedGraph.GetQuestInsertionInputs(candidate);
+            var outputs = RedGraph.GetQuestInsertionOutputs(candidate);
+            if (inputs.Count == 0 || outputs.Count == 0)
+            {
+                Interactions.ShowMessageBox("This node/template needs an ordinary input and output socket to be inserted. The connection was not changed.",
+                    "Cannot Insert Node", WMessageBoxButtons.Ok, WMessageBoxImage.Information);
+                return;
+            }
+
+            var input = ChooseQuestInsertionSocket(inputs, "input", "Connect the original source to this input.");
+            if (input is null)
+            {
+                return;
+            }
+            var output = ChooseQuestInsertionSocket(outputs, "output", "Connect this output to the original destination.");
+            if (output is null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(Source, graph) || !graph.TryInsertQuestNode(connection, candidate, input, output))
+            {
+                Interactions.ShowMessageBox("The graph or selected sockets no longer support this insertion. The connection was not changed.",
+                    "Cannot Insert Node", WMessageBoxButtons.Ok, WMessageBoxImage.Information);
+                return;
+            }
+
+            inserted = true;
+            SelectNodeById(candidate.UniqueId);
+            graph.GraphStateSave();
+        }
+        catch (Exception exception)
+        {
+            _loggerService?.Error(exception);
+            Interactions.ShowMessageBox(inserted
+                    ? "The node was inserted, but the editor could not finish updating its view. See the log for details."
+                    : "The node could not be inserted. The connection was not changed. See the log for details.",
+                "Insert Node on Connection", WMessageBoxButtons.Ok, WMessageBoxImage.Error);
+        }
+        finally
+        {
+            if (!inserted)
+            {
+                candidate?.Dispose();
+            }
+        }
+    }
+
+    private static T ChooseQuestInsertionSocket<T>(IReadOnlyList<T> sockets, string kind, string description)
+        where T : BaseConnectorViewModel
+    {
+        if (sockets.Count == 1)
+        {
+            return sockets[0];
+        }
+
+        // Index labels distinguish templates with duplicate socket names; selection maps to the exact socket.
+        var choices = sockets.Select((socket, index) => (Label: $"{socket.Name} [{index + 1}]", Socket: socket))
+            .ToDictionary(choice => choice.Label, choice => choice.Socket);
+        var selected = Interactions.AskForDropdownOption((choices.Keys.ToList(), $"Choose {kind} socket",
+            description, null, false, null));
+        return choices.TryGetValue(selected, out var socket) ? socket : null;
     }
 
     private static GraphActionPaletteItem CreatePaletteCommand(
@@ -1238,6 +1514,45 @@ public partial class GraphEditorView : UserControl
             connectionViewModel.IsSelected = true;
 
             var contextMenu = new ContextMenu();
+
+            if (Source.GraphType == RedGraphType.Quest && connectionViewModel is QuestConnectionViewModel insertionConnection)
+            {
+                var graph = Source;
+                var graphPosition = GetMousePositionInGraph(Editor);
+                var popupPosition = Mouse.GetPosition(Editor);
+                var insertItem = CreateMenuItem("Insert Node on Connection...", "Plus", () =>
+                {
+                    contextMenu.SetCurrentValue(ContextMenu.IsOpenProperty, false);
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (ReferenceEquals(Source, graph) && graph.CanInsertQuestNodeOnConnection(insertionConnection))
+                        {
+                            OpenGraphActionPalette(graphPosition, popupPosition, insertionConnection: insertionConnection);
+                        }
+                    }, DispatcherPriority.ContextIdle);
+                });
+                insertItem.IsEnabled = graph.CanInsertQuestNodeOnConnection(insertionConnection);
+                insertItem.ToolTip = "Insert a node on an ordinary flow connection. Cut links cannot be split.";
+                ToolTipService.SetShowOnDisabled(insertItem, true);
+                contextMenu.Items.Add(insertItem);
+                foreach (var endpoint in new[] { QuestConnectionEndpoint.Source, QuestConnectionEndpoint.Destination })
+                {
+                    var rewireEndpoint = endpoint;
+                    var rewireItem = CreateMenuItem($"Rewire {endpoint}...", "LinkVariant", () =>
+                    {
+                        contextMenu.SetCurrentValue(ContextMenu.IsOpenProperty, false);
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            if (ReferenceEquals(Source, graph)) BeginQuestConnectionRewire(insertionConnection, rewireEndpoint);
+                        }, DispatcherPriority.Input);
+                    });
+                    rewireItem.IsEnabled = graph.CanStartQuestConnectionRewire(insertionConnection, out var reason);
+                    rewireItem.ToolTip = rewireItem.IsEnabled ? "Choose a compatible socket. Escape cancels." : reason;
+                    ToolTipService.SetShowOnDisabled(rewireItem, true);
+                    contextMenu.Items.Add(rewireItem);
+                }
+                contextMenu.Items.Add(new Separator());
+            }
 
             var deleteMenuItem = CreateMenuItem("Delete Connection", "Delete", "WolvenKitRed", () =>
             {
@@ -1483,12 +1798,12 @@ public partial class GraphEditorView : UserControl
     /// <summary>
     /// Get the mouse position in graph coordinates for placing new nodes
     /// </summary>
-    private System.Windows.Point GetMousePositionInGraph(NodifyEditor editor)
+    private System.Windows.Point GetMousePositionInGraph(NodifyEditor editor, System.Windows.Point? mousePosition = null)
     {
         try
         {
             // Get mouse position relative to the editor
-            var mousePos = Mouse.GetPosition(editor);
+            var mousePos = mousePosition ?? Mouse.GetPosition(editor);
 
             // Convert to graph coordinates by accounting for viewport offset and zoom
             var graphX = (mousePos.X / editor.ViewportZoom) + editor.ViewportLocation.X;

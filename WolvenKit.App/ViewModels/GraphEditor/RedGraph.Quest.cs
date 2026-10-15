@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -108,9 +108,8 @@ public partial class RedGraph
 
     public uint CreateQuestNode(Type type, System.Windows.Point point, RedTypeTemplateSelectionOption? templateDesc = null)
     {
-        var instance = InternalCreateQuestNode(type, templateDesc);
-        var wrappedInstance = WrapQuestNode(instance, true);
-        wrappedInstance.Location = point;
+        var wrappedInstance = PrepareQuestNode(type, point, templateDesc);
+        var instance = (graphGraphNodeDefinition)wrappedInstance.Data;
 
         ((graphGraphDefinition)_data).Nodes.Add(new CHandle<graphGraphNodeDefinition>(instance));
         if (GetQuestNodesChunkViewModel() is { } nodes)
@@ -119,13 +118,14 @@ public partial class RedGraph
         }
 
         Nodes.Add(wrappedInstance);
+        RaiseCurrentQuestNodeId((ushort)wrappedInstance.UniqueId);
 
         DocumentViewModel?.SetIsDirty(true);
 
         return wrappedInstance.UniqueId;
     }
 
-    private graphGraphNodeDefinition InternalCreateQuestNode(Type type, RedTypeTemplateSelectionOption? templateDesc = null)
+    private graphGraphNodeDefinition InternalCreateQuestNode(Type type, RedTypeTemplateSelectionOption? templateDesc = null, ushort? nodeId = null)
     {
         IRedType instance;
         if (templateDesc != null)
@@ -155,7 +155,7 @@ public partial class RedGraph
 
         if (instance is questNodeDefinition nodeDefinition)
         {
-            nodeDefinition.Id = ++CurrentQuestNodeId;
+            nodeDefinition.Id = nodeId ?? ++CurrentQuestNodeId;
 
             // Special initialization for certain quest node types
             if (nodeDefinition is questFactsDBManagerNodeDefinition factsDBNode)
@@ -584,27 +584,28 @@ public partial class RedGraph
         return nodes;
     }
 
-    private void AddQuestConnection(QuestOutputConnectorViewModel source, QuestInputConnectorViewModel destination)
+    private QuestConnectionViewModel AddQuestConnection(QuestOutputConnectorViewModel source, QuestInputConnectorViewModel destination,
+        bool notify = true, graphGraphConnectionDefinition? definition = null)
     {
-        var connection = new graphGraphConnectionDefinition()
+        var connection = definition ?? new graphGraphConnectionDefinition();
+        connection.Source = new CWeakHandle<graphGraphSocketDefinition>(source.Data);
+        connection.Destination = new CWeakHandle<graphGraphSocketDefinition>(destination.Data);
+        var handle = new CHandle<graphGraphConnectionDefinition>(connection);
+        source.Data.Connections.Add(handle);
+        destination.Data.Connections.Add(handle);
+
+        var viewModel = new QuestConnectionViewModel(source, destination, connection);
+        Connections.Add(viewModel);
+
+        if (notify)
         {
-            Source = new CWeakHandle<graphGraphSocketDefinition>(source.Data),
-            Destination = new CWeakHandle<graphGraphSocketDefinition>(destination.Data)
-        };
-
-        source.Data.Connections.Add(new CHandle<graphGraphConnectionDefinition>(connection));
-        destination.Data.Connections.Add(new CHandle<graphGraphConnectionDefinition>(connection));
-
-        Connections.Add(new QuestConnectionViewModel(source, destination, connection));
-
-        // Notify UI to refresh affected nodes
-        NotifyNodesUpdated(source.OwnerId, destination.OwnerId);
-
-        // Mark document as dirty since we modified connections
-        DocumentViewModel?.SetIsDirty(true);
+            NotifyNodesUpdated(source.OwnerId, destination.OwnerId);
+            DocumentViewModel?.SetIsDirty(true);
+        }
+        return viewModel;
     }
 
-    private void RemoveQuestConnection(QuestConnectionViewModel questConnection)
+    private void RemoveQuestConnection(QuestConnectionViewModel questConnection, bool notify = true)
     {
         var questSource = (QuestOutputConnectorViewModel)questConnection.Source;
         var questDestination = (QuestInputConnectorViewModel)questConnection.Target;
@@ -628,11 +629,11 @@ public partial class RedGraph
         }
         Connections.Remove(questConnection);
 
-        // Notify UI to refresh affected nodes
-        NotifyNodesUpdated(questSource.OwnerId, questDestination.OwnerId);
-
-        // Mark document as dirty since we modified connections
-        DocumentViewModel?.SetIsDirty(true);
+        if (notify)
+        {
+            NotifyNodesUpdated(questSource.OwnerId, questDestination.OwnerId);
+            DocumentViewModel?.SetIsDirty(true);
+        }
     }
 
     public void RemoveQuestConnectionPublic(QuestConnectionViewModel questConnection)
@@ -641,51 +642,7 @@ public partial class RedGraph
         RefreshCVM(new[] { ((QuestOutputConnectorViewModel)questConnection.Source).Data, ((QuestInputConnectorViewModel)questConnection.Target).Data });
     }
 
-    public void DuplicateQuestNode(BaseQuestViewModel originalNode)
-    {
-        if (originalNode.Data is not IRedCloneable cloneable)
-        {
-            _loggerService?.Error($"Cannot duplicate node of type {originalNode.Data.GetType().Name} - it doesn't implement IRedCloneable");
-            return;
-        }
-
-        var duplicatedData = (questNodeDefinition)cloneable.DeepCopy();
-
-        var newNodeId = GetNextAvailableQuestNodeId();
-        duplicatedData.Id = newNodeId;
-        CurrentQuestNodeId = Math.Max(CurrentQuestNodeId, newNodeId);
-
-        foreach (var socket in duplicatedData.Sockets)
-        {
-            if (socket.Chunk is questSocketDefinition socketDef)
-            {
-                socketDef.Connections.Clear();
-            }
-        }
-
-        if (duplicatedData is questPhaseNodeDefinition phaseNode)
-        {
-            RepairCopiedPhaseGraphConnections(phaseNode);
-        }
-
-        var wrappedDuplicate = WrapQuestNode(duplicatedData, false);
-
-        wrappedDuplicate.Location = new System.Windows.Point(
-            originalNode.Location.X + 50,
-            originalNode.Location.Y + 50
-        );
-
-        ((graphGraphDefinition)_data).Nodes.Add(new CHandle<graphGraphNodeDefinition>(duplicatedData));
-
-        if (GetQuestNodesChunkViewModel() is { } nodes)
-        {
-            nodes.RecalculateProperties();
-        }
-
-        Nodes.Add(wrappedDuplicate);
-
-        _loggerService?.Info($"Duplicated quest node with new ID: {duplicatedData.Id}");
-    }
+    public void DuplicateQuestNode(BaseQuestViewModel originalNode) => DuplicateQuestNodes([originalNode]);
 
     public void PasteQuestNode(IRedType copiedData, System.Windows.Point location)
     {

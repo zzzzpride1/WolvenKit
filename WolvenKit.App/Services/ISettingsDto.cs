@@ -42,6 +42,7 @@ public interface ISettingsDto
     public bool ShowReferenceGraph { get; set; }
     public EGameLanguage GameLanguage { get; set; }
     public bool ShowGraphEditorNodeProperties { get; set; }
+    public Dictionary<string, string> GraphActionShortcuts { get; set; }
 
     #endregion
 

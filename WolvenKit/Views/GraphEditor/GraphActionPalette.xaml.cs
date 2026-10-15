@@ -15,6 +15,7 @@ namespace WolvenKit.Views.GraphEditor;
 
 public sealed class GraphActionPaletteItem
 {
+    public string ActionId { get; init; } = "";
     public string Title { get; init; } = "";
     public string Subtitle { get; init; } = "";
     public string Category { get; init; } = "";
@@ -24,10 +25,22 @@ public sealed class GraphActionPaletteItem
     public string ParentTitle { get; init; } = "";
     public bool IsVariant { get; init; }
     public bool IsSearchOnly { get; init; }
+    public bool IsEnabled { get; init; } = true;
     public bool HasMaterialIcon => !string.IsNullOrEmpty(IconKind);
     public IReadOnlyList<GraphActionPaletteItem> Variants { get; init; } = [];
     public bool HasVariants => Variants.Count > 0;
     public Action Execute { get; init; } = () => { };
+
+    public bool TryExecute()
+    {
+        if (!IsEnabled)
+        {
+            return false;
+        }
+
+        Execute();
+        return true;
+    }
 
     public bool Matches(string query)
     {
@@ -48,6 +61,7 @@ public partial class GraphActionPalette : UserControl, INotifyPropertyChanged
     private IReadOnlyList<GraphActionPaletteItem> _rootItems = [];
     private GraphActionPaletteItem _variantParent;
     private string _heading = "All Actions";
+    private string _contextDescription = "";
     private string _searchText = "";
     private string _variantHeading = "";
     private bool _isVariantPanelVisible;
@@ -68,6 +82,12 @@ public partial class GraphActionPalette : UserControl, INotifyPropertyChanged
     {
         get => _heading;
         private set => SetField(ref _heading, value);
+    }
+
+    public string ContextDescription
+    {
+        get => _contextDescription;
+        set => SetField(ref _contextDescription, value);
     }
 
     public string SearchText
@@ -317,6 +337,11 @@ public partial class GraphActionPalette : UserControl, INotifyPropertyChanged
         FrameworkElement anchor,
         bool selectFirst)
     {
+        if (!item.IsEnabled)
+        {
+            return;
+        }
+
         _variantParent = item;
         VariantHeading = "Choose template";
         VariantItems.Clear();
@@ -433,12 +458,11 @@ public partial class GraphActionPalette : UserControl, INotifyPropertyChanged
 
     private void ExecuteSelectedItem(ListBox list)
     {
-        if (list.SelectedItem is not GraphActionPaletteItem item)
+        if (list.SelectedItem is not GraphActionPaletteItem item || !item.TryExecute())
         {
             return;
         }
 
-        item.Execute();
         ActionExecuted?.Invoke(this, EventArgs.Empty);
     }
 

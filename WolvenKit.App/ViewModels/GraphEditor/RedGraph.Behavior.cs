@@ -114,6 +114,11 @@ public partial class RedGraph
 
     public bool CanAddBehaviorChild(BehaviorNodeViewModel parent)
     {
+        if (GraphType != RedGraphType.Behavior || !Nodes.Contains(parent))
+        {
+            return false;
+        }
+
         return parent.Data switch
         {
             AIbehaviorCompositeTreeNodeDefinition composite => CanAddBehaviorCompositeChild(composite),
@@ -152,6 +157,11 @@ public partial class RedGraph
         if (GraphType != RedGraphType.Behavior)
         {
             throw new InvalidOperationException("Cannot add behavior child on non-behavior graph.");
+        }
+
+        if (!Nodes.Contains(parent))
+        {
+            throw new InvalidOperationException("Behavior parent is no longer part of this graph.");
         }
 
         var behaviorNode = InternalCreateBehaviorNode(type, template);

@@ -262,7 +262,7 @@ public class BehaviorNodeViewModel : NodeViewModel, IRefreshableDetails
 
     private static string? GetMappingValue(AIArgumentMapping? mapping)
     {
-        var value = mapping?.DefaultValue.Value;
+        var value = mapping?.DefaultValue?.Value;
         return FormatRedValue(value);
     }
 

@@ -1164,15 +1164,12 @@ namespace WolvenKit.Views.Documents
                 }
             }
 
-            // Shortcut: Ctrl+D to duplicate currently selected node
-            if (e.Key == Key.D && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            // Duplicate the current subgraph selection; property editors keep their normal text shortcuts.
+            if (!e.Handled && !e.IsRepeat && e.Key == Key.D && Keyboard.Modifiers == ModifierKeys.Control &&
+                QuestPhaseGraphEditor is { } graphEditor && graphEditor.Editor.IsKeyboardFocusWithin &&
+                !GraphEditorView.IsGraphTextInputFocused())
             {
-                var selectedNode = NodeSelectionService.Instance.SelectedNode;
-                if (selectedNode != null)
-                {
-                    currentGraph.DuplicateNode(selectedNode);
-                    e.Handled = true;
-                }
+                e.Handled = graphEditor.DuplicateSelectedQuestNodes();
             }
 
             // Shortcut: Ctrl+C to copy currently selected node

@@ -7,6 +7,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DynamicData.Binding;
 using WolvenKit.App.Models;
+using GraphActionShortcutMap = WolvenKit.App.ViewModels.GraphEditor.GraphActionShortcuts;
 using WolvenKit.App.ViewModels.Tools.EditorDifficultyLevel;
 using WolvenKit.Common;
 using WolvenKit.Core;
@@ -64,6 +65,7 @@ public partial class SettingsManager : ObservableObject, ISettingsManager
             nameof(ShowReferenceGraph),
             nameof(GameLanguage),
             nameof(ShowGraphEditorNodeProperties),
+            nameof(GraphActionShortcuts),
 
             // FileEditor
             nameof(TreeViewGroups),
@@ -262,6 +264,10 @@ public partial class SettingsManager : ObservableObject, ISettingsManager
     [Display(Name = "Show Graph Editor Node Properties", GroupName = "Display")]
     [ObservableProperty]
     private bool _showGraphEditorNodeProperties = true;
+
+    [ObservableProperty]
+    [property: System.ComponentModel.Browsable(false)]
+    private Dictionary<string, string> _graphActionShortcuts = GraphActionShortcutMap.CreateDefaultBindings();
 
     #endregion
 

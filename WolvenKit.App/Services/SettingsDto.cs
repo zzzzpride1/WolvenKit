@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.Json;
 using WolvenKit.App.Extensions;
 using WolvenKit.App.Models;
+using GraphActionShortcutMap = WolvenKit.App.ViewModels.GraphEditor.GraphActionShortcuts;
 using WolvenKit.App.ViewModels.Tools.EditorDifficultyLevel;
 using WolvenKit.Common;
 
@@ -56,6 +57,7 @@ public class SettingsDto : ISettingsDto
         ShowReferenceGraph = settings.ShowReferenceGraph;
         GameLanguage = settings.GameLanguage;
         ShowGraphEditorNodeProperties = settings.ShowGraphEditorNodeProperties;
+        GraphActionShortcuts = settings.GraphActionShortcuts;
 
         // File Editor
         TreeViewGroups = settings.TreeViewGroups;
@@ -124,6 +126,7 @@ public class SettingsDto : ISettingsDto
     public bool ShowReferenceGraph { get; set; }
     public EGameLanguage GameLanguage { get; set; } = EGameLanguage.en_us;
     public bool ShowGraphEditorNodeProperties { get; set; } = true;
+    public Dictionary<string, string> GraphActionShortcuts { get; set; } = GraphActionShortcutMap.CreateDefaultBindings();
 
     #endregion
 
@@ -202,6 +205,7 @@ public class SettingsDto : ISettingsDto
         settingsManager.ShowReferenceGraph = ShowReferenceGraph;
         settingsManager.GameLanguage = GameLanguage;
         settingsManager.ShowGraphEditorNodeProperties = ShowGraphEditorNodeProperties;
+        settingsManager.GraphActionShortcuts = GraphActionShortcuts;
 
         // File Editor
         settingsManager.TreeViewGroups = TreeViewGroups;
